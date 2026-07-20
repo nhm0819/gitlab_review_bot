@@ -1,0 +1,28 @@
+# Reusable CI/CD job for AI-powered merge request review.
+#
+# Use it in another GitLab project either by copying this job into that
+# project's .gitlab-ci.yml, or by including it directly:
+#
+#   include:
+#     - remote: 'https://raw.githubusercontent.com/nhm0819/gitlab_review_bot/main/.gitlab-ci.yml'
+#
+# Required CI/CD variables (Settings > CI/CD > Variables), set as
+# masked + protected:
+#   GITLAB_TOKEN      - a project/group access token with `api` scope
+#   ANTHROPIC_API_KEY - an Anthropic API key
+#
+# Optional: commit a .gitlab/review-bot.yml file to the project being
+# reviewed (see examples/review-bot.example.yml) to exclude branches,
+# authors, or paths, and to add custom review instructions.
+
+ai_code_review:
+  image: python:3.11-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  before_script:
+    - pip install --quiet "git+https://github.com/nhm0819/gitlab_review_bot.git@main"
+  script:
+    - gitlab-review-bot
+  variables:
+    GITLAB_URL: "$CI_SERVER_URL"
+  allow_failure: true

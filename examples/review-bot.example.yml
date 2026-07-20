@@ -1,0 +1,27 @@
+# Copy this file to `.gitlab/review-bot.yml` in the project you want the bot
+# to review. All keys are optional.
+
+exclude:
+  target_branches:
+    - "release/*"
+  source_branches:
+    - "dependabot/*"
+    - "renovate/*"
+  authors:
+    - "*-bot"
+    - "project_*_bot*"
+
+paths:
+  exclude:
+    - "**/*.lock"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "**/*.min.js"
+    - "**/vendor/**"
+    - "**/dist/**"
+
+# Free-text instructions appended to every review prompt for this project.
+instructions: |
+  Prioritize security issues in authentication and payment-related code.
+  Follow the project's existing code style; do not suggest reformatting.
+  Ignore missing docstrings on private (underscore-prefixed) functions.
