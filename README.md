@@ -62,33 +62,52 @@ python -m vllm.entrypoints.openai.api_server \
 | `VLLM_MODEL` | ✅ | vLLM에 서빙된 모델명 |
 | `VLLM_API_KEY` | | 게이트웨이가 키를 요구할 때만. 기본 `not-needed` |
 
-### 4. 리뷰 대상 프로젝트의 `.gitlab-ci.yml`에 job 추가
+### 4. 컨테이너 이미지 빌드 및 harbor 레지스트리에 push
 
-이 저장소의 `.gitlab-ci.yml`을 통째로 include 하는 방법(권장):
+CI job은 `pip install` 없이 **미리 패키지가 설치된 이미지**를 사용합니다.
+저장소의 `Dockerfile`(Python 3.12 기반)로 이미지를 빌드해 사내 harbor에 올립니다.
 
-```yaml
-include:
-  - remote: 'https://raw.githubusercontent.com/nhm0819/gitlab_review_bot/main/.gitlab-ci.yml'
+```bash
+docker build -t harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0 .
+docker push harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
 ```
 
-또는 job 정의를 직접 복사해서 사용해도 됩니다. 두 경우 모두 `pip install`이
-GitHub 저장소에서 직접 패키지를 설치하므로, GitLab Runner가 `github.com`에
-아웃바운드 접근이 가능해야 합니다. 사내망이라 접근이 막혀 있다면 이 저장소를
-GitLab 미러/사내 패키지 레지스트리에 복제해 두고 `pip install` 경로만
-바꿔주면 됩니다.
+GitLab Runner가 harbor에서 이 이미지를 pull할 수 있어야 합니다. (기존 GitLab
+이미지들이 이미 harbor에서 정상 pull되고 있으므로 imagePullSecret이 구성돼
+있을 가능성이 높습니다. pull이 실패하면 Runner 파드의 pull secret을 확인하세요.)
 
-### 5. (선택) 프로젝트별 예외/커스텀 지시사항 설정
+### 5. 리뷰 대상 프로젝트의 `.gitlab-ci.yml`에 job 추가
+
+job 정의를 프로젝트 `.gitlab-ci.yml`에 복사해서 사용합니다.
+
+```yaml
+ai_code_review:
+  image: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - gitlab-review-bot
+  variables:
+    GITLAB_URL: "$CI_SERVER_URL"
+  allow_failure: true
+```
+
+이러면 harbor에서 이미지만 pull해서 바로 `gitlab-review-bot`을 실행 →
+리뷰 → 종료합니다. MR 이벤트에서만 트리거됩니다.
+
+### 6. (선택) 프로젝트별 예외/커스텀 지시사항 설정
 
 리뷰 대상 프로젝트 루트에 `.gitlab/review-bot.yml` 파일을 추가하면 특정
 브랜치·작성자·경로를 리뷰에서 제외하거나, 리뷰 시 참고할 커스텀 지시사항을
 넣을 수 있습니다. 예시는 [`examples/review-bot.example.yml`](examples/review-bot.example.yml)
 참고.
 
-## 로컬에서 테스트하기
+## 로컬에서 테스트하기 (Python 3.12)
 
 ```bash
 git clone https://github.com/nhm0819/gitlab_review_bot.git
 cd gitlab_review_bot
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 export GITLAB_URL=https://gitlab.example.com

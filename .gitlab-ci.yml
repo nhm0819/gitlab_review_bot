@@ -1,12 +1,19 @@
 # Reusable CI/CD job for AI-powered merge request review.
 #
 # Uses an internal vLLM service (OpenAI-compatible API) -- no external API calls.
+# Runs from a prebuilt image on the internal harbor registry, so there is no
+# pip install at job time and the runner needs no internet access.
 #
 # Use it in another GitLab project either by copying this job into that
 # project's .gitlab-ci.yml, or by including it directly:
 #
 #   include:
-#     - remote: 'https://raw.githubusercontent.com/nhm0819/gitlab_review_bot/main/.gitlab-ci.yml'
+#     - project: 'your-group/gitlab_review_bot'
+#       file: '/.gitlab-ci.yml'
+#       ref: main
+#
+# (If this repo lives on GitHub rather than your GitLab instance, copy the
+#  job below into the target project's .gitlab-ci.yml instead of using include.)
 #
 # Required CI/CD variables (Settings > CI/CD > Variables):
 #   GITLAB_TOKEN  - a project/group access token with `api` scope (masked + protected)
@@ -20,11 +27,9 @@
 # authors, or paths, and to add custom review instructions.
 
 ai_code_review:
-  image: python:3.11-slim
+  image: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  before_script:
-    - pip install --quiet "git+https://github.com/nhm0819/gitlab_review_bot.git@main"
   script:
     - gitlab-review-bot
   variables:

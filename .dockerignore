@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+__pycache__/
+*.pyc
+*.egg-info/
+.env
+.venv/
+venv/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+examples/
+README.md
