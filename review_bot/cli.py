@@ -1,4 +1,4 @@
-"""Entry point: fetch an MR diff, ask Claude to review it, post the results.
+"""Entry point: fetch an MR diff, review it via the internal vLLM service, post results.
 
 Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
 
@@ -6,7 +6,8 @@ Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
     export GITLAB_TOKEN=glpat-...
     export CI_PROJECT_ID=123
     export CI_MERGE_REQUEST_IID=45
-    export ANTHROPIC_API_KEY=sk-ant-...
+    export VLLM_BASE_URL=http://vllm.internal.svc.cluster.local:8000/v1
+    export VLLM_MODEL=Qwen2.5-Coder-32B-Instruct
     python -m review_bot.cli
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ from .config import Config, ConfigError
 from .diff_parser import addable_lines, added_line_numbers
 from .exclude_rules import ReviewRules
 from .gitlab_client import GitLabClient
-from .reviewer import ClaudeReviewer
+from .reviewer import VLLMReviewer
 
 MARKER_PREFIX = "<!-- ai-review-bot:head_sha="
 
@@ -77,7 +78,14 @@ def main() -> int:
         print("[review-bot] no reviewable file changes found, skipping.")
         return 0
 
-    reviewer = ClaudeReviewer(cfg.anthropic_api_key, cfg.anthropic_model)
+    reviewer = VLLMReviewer(
+        base_url=cfg.vllm_base_url,
+        model=cfg.vllm_model,
+        api_key=cfg.vllm_api_key,
+        timeout=cfg.vllm_timeout,
+        max_tokens=cfg.vllm_max_tokens,
+        temperature=cfg.vllm_temperature,
+    )
     result = reviewer.review(
         title=mr.get("title", ""),
         description=mr.get("description", ""),

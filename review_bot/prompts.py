@@ -1,4 +1,4 @@
-"""Prompt templates used to ask Claude for a structured code review."""
+"""Prompt templates used to request a structured code review from the LLM."""
 
 SYSTEM_PROMPT = """You are a senior software engineer performing a merge request code review.
 Review only the diff you are given. Focus on, in priority order:

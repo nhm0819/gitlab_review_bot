@@ -1,15 +1,19 @@
 # Reusable CI/CD job for AI-powered merge request review.
 #
+# Uses an internal vLLM service (OpenAI-compatible API) -- no external API calls.
+#
 # Use it in another GitLab project either by copying this job into that
 # project's .gitlab-ci.yml, or by including it directly:
 #
 #   include:
 #     - remote: 'https://raw.githubusercontent.com/nhm0819/gitlab_review_bot/main/.gitlab-ci.yml'
 #
-# Required CI/CD variables (Settings > CI/CD > Variables), set as
-# masked + protected:
-#   GITLAB_TOKEN      - a project/group access token with `api` scope
-#   ANTHROPIC_API_KEY - an Anthropic API key
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   GITLAB_TOKEN  - a project/group access token with `api` scope (masked + protected)
+#   VLLM_BASE_URL - internal vLLM endpoint, e.g. http://vllm.internal.svc:8000/v1
+#   VLLM_MODEL    - served model name, e.g. Qwen2.5-Coder-32B-Instruct
+#
+# Optional: VLLM_API_KEY, VLLM_TIMEOUT, VLLM_MAX_TOKENS, VLLM_TEMPERATURE.
 #
 # Optional: commit a .gitlab/review-bot.yml file to the project being
 # reviewed (see examples/review-bot.example.yml) to exclude branches,

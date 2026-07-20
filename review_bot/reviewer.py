@@ -1,12 +1,17 @@
-"""Calls the Anthropic API to generate a structured code review."""
+"""Calls an internal vLLM service (OpenAI-compatible API) to generate a review.
+
+vLLM exposes an OpenAI-compatible `/v1/chat/completions` endpoint, so this
+uses the `openai` SDK pointed at the internal vLLM base URL. No external API
+calls are made -- everything stays within the internal network.
+"""
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-import anthropic
+from openai import OpenAI
 
 from .prompts import FILE_BLOCK, SYSTEM_PROMPT, USER_PROMPT_HEADER
 
@@ -27,10 +32,22 @@ class ReviewResult:
     comments: List[ReviewComment]
 
 
-class ClaudeReviewer:
-    def __init__(self, api_key: str, model: str):
-        self._client = anthropic.Anthropic(api_key=api_key)
+class VLLMReviewer:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str = "not-needed",
+        timeout: int = 120,
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+    ):
+        # api_key is usually irrelevant for an internal vLLM server, but the
+        # OpenAI client requires a non-empty value, so a placeholder is used.
+        self._client = OpenAI(base_url=base_url, api_key=api_key or "not-needed", timeout=timeout)
         self._model = model
+        self._max_tokens = max_tokens
+        self._temperature = temperature
 
     def review(
         self,
@@ -54,13 +71,16 @@ class ClaudeReviewer:
                 diff=block["diff"],
             )
 
-        response = self._client.messages.create(
+        response = self._client.chat.completions.create(
             model=self._model,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
         )
-        text = "".join(part.text for part in response.content if getattr(part, "type", None) == "text")
+        text = _extract_text(response)
         data = _parse_json_response(text)
 
         comments = [
@@ -74,6 +94,13 @@ class ClaudeReviewer:
             if c.get("file") and c.get("line") and c.get("comment")
         ]
         return ReviewResult(summary=str(data.get("summary", "")).strip(), comments=comments)
+
+
+def _extract_text(response: Any) -> str:
+    if not getattr(response, "choices", None):
+        return ""
+    content = response.choices[0].message.content
+    return content or ""
 
 
 def _parse_json_response(text: str) -> Dict[str, Any]:
