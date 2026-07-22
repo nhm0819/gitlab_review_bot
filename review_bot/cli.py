@@ -7,7 +7,7 @@ Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
     export CI_PROJECT_ID=123
     export CI_MERGE_REQUEST_IID=45
     export VLLM_BASE_URL=http://vllm.internal.svc.cluster.local:8000/v1
-    export VLLM_MODEL=Qwen2.5-Coder-32B-Instruct
+    export VLLM_MODEL=Qwen/Qwen3.6-35B-A3B-FP8
     python -m review_bot.cli
 """
 from __future__ import annotations
@@ -78,14 +78,7 @@ def main() -> int:
         print("[review-bot] no reviewable file changes found, skipping.")
         return 0
 
-    reviewer = VLLMReviewer(
-        base_url=cfg.vllm_base_url,
-        model=cfg.vllm_model,
-        api_key=cfg.vllm_api_key,
-        timeout=cfg.vllm_timeout,
-        max_tokens=cfg.vllm_max_tokens,
-        temperature=cfg.vllm_temperature,
-    )
+    reviewer = VLLMReviewer(cfg.llm)
     result = reviewer.review(
         title=mr.get("title", ""),
         description=mr.get("description", ""),
