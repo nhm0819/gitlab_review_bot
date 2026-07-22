@@ -13,6 +13,11 @@ from typing import Dict, List, Optional
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
+# Prefix used by batching.condense_diff for "N hunks omitted" markers. It is
+# skipped here so an annotation can never be mistaken for a context line and
+# shift the new-file line numbers that inline comments are anchored to.
+OMISSION_PREFIX = "~~~"
+
 
 @dataclass
 class DiffLine:
@@ -33,6 +38,8 @@ def parse_diff(diff_text: str) -> List[DiffLine]:
             new_no = int(hunk.group(2))
             continue
         if raw.startswith("+++") or raw.startswith("---") or raw.startswith("\\ No newline"):
+            continue
+        if raw.startswith(OMISSION_PREFIX):
             continue
         if raw.startswith("+"):
             lines.append(DiffLine("add", None, new_no, raw[1:]))

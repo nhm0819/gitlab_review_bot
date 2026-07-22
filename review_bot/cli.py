@@ -153,8 +153,13 @@ def _run(log: logging.Logger) -> int:
             summary_lines.append("\n**Coverage:**")
             if len(batches) > 1:
                 summary_lines.append(f"- Reviewed in {len(batches)} passes and merged.")
-            for path in truncated:
-                summary_lines.append(f"- `{path}` was too large to include in full; only part of it was reviewed.")
+            for change in ranked:
+                if change.truncated:
+                    summary_lines.append(
+                        f"- `{change.path}` was too large to include in full; "
+                        f"the most review-relevant hunks were kept and "
+                        f"{change.omitted_hunks} other hunk(s) were omitted."
+                    )
             for change in dropped:
                 summary_lines.append(f"- `{change.path}` exceeded the review budget and was not reviewed.")
         client.post_note("\n".join(summary_lines))

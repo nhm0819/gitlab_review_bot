@@ -12,6 +12,9 @@ Rules:
 - Do not invent line numbers.
 - Be concise: one to three sentences per comment.
 - If the same issue repeats across many files, mention it once in the summary instead of once per file.
+- Lines starting with `~~~` are annotations marking parts of a large diff that were
+  omitted to fit the context. They are not code: never comment on them, and do not
+  speculate about the omitted content.
 - If the diff looks fine, say so plainly instead of inventing issues.
 - Respond with ONLY a single JSON object. No markdown code fences, no prose outside the JSON.
 
@@ -56,6 +59,7 @@ Rules:
 - Describe only what the diff actually shows. Never invent motivation, ticket numbers,
   benchmarks, or testing that is not evident from the changes.
 - Do not list every file. Summarize.
+- Lines starting with `~~~` mark omitted parts of a large diff; they are annotations, not code.
 - Write the title and description in {language}.
 - Respond with ONLY a single JSON object. No markdown code fences, no prose outside the JSON.
 
