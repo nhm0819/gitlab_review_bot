@@ -29,6 +29,34 @@ class GitLabClient:
         resp.raise_for_status()
         return resp.json().get("changes", [])
 
+    def get_mr_commits(self) -> List[Dict[str, Any]]:
+        resp = requests.get(
+            self._url(f"/merge_requests/{self._mr_iid}/commits"),
+            headers=self._headers,
+            params={"per_page": 100},
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_mr(self, title: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
+        """Update the MR title and/or description. Fields left as None are untouched."""
+        payload: Dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if description is not None:
+            payload["description"] = description
+        if not payload:
+            return {}
+        resp = requests.put(
+            self._url(f"/merge_requests/{self._mr_iid}"),
+            headers=self._headers,
+            json=payload,
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def get_notes(self) -> List[Dict[str, Any]]:
         resp = requests.get(
             self._url(f"/merge_requests/{self._mr_iid}/notes"),

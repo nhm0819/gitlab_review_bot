@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 gitlab-review-bot = "review_bot.cli:main"
+gitlab-mr-describe = "review_bot.describe_cli:main"
 
 [tool.setuptools]
 packages = ["review_bot"]

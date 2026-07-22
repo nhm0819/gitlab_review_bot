@@ -38,6 +38,8 @@ class Config:
     vllm_max_tokens: int = 4096
     vllm_temperature: float = 0.2
 
+    describe_language: str = "Korean"
+
     max_diff_chars: int = 60_000
     max_comments: int = 25
     post_inline_comments: bool = True
@@ -62,6 +64,8 @@ class Config:
         vllm_max_tokens = int(_env("VLLM_MAX_TOKENS", "4096"))
         vllm_temperature = float(_env("VLLM_TEMPERATURE", "0.2"))
 
+        describe_language = _env("DESCRIBE_LANGUAGE", "Korean")
+
         max_diff_chars = int(_env("MAX_DIFF_CHARS", "60000"))
         max_comments = int(_env("MAX_COMMENTS", "25"))
         post_inline = (_env("POST_INLINE_COMMENTS", "true") or "true").lower() in ("1", "true", "yes")
@@ -81,6 +85,7 @@ class Config:
             vllm_timeout=vllm_timeout,
             vllm_max_tokens=vllm_max_tokens,
             vllm_temperature=vllm_temperature,
+            describe_language=describe_language,
             max_diff_chars=max_diff_chars,
             max_comments=max_comments,
             post_inline_comments=post_inline,

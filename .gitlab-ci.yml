@@ -1,37 +1,53 @@
-# Reusable CI/CD job for AI-powered merge request review.
+# Reusable CI/CD jobs for AI-powered merge request automation.
 #
 # Uses an internal vLLM service (OpenAI-compatible API) -- no external API calls.
 # Runs from a prebuilt image on the internal harbor registry, so there is no
 # pip install at job time and the runner needs no internet access.
 #
-# Use it in another GitLab project either by copying this job into that
-# project's .gitlab-ci.yml, or by including it directly:
+# `entrypoint: [""]` is required because the image defines an ENTRYPOINT; the
+# runner needs a plain shell to execute the `script:` block.
+#
+# Copy the jobs below into the target project's .gitlab-ci.yml (or include this
+# file if the repo is mirrored onto your GitLab instance):
 #
 #   include:
 #     - project: 'your-group/gitlab_review_bot'
 #       file: '/.gitlab-ci.yml'
 #       ref: main
 #
-# (If this repo lives on GitHub rather than your GitLab instance, copy the
-#  job below into the target project's .gitlab-ci.yml instead of using include.)
-#
 # Required CI/CD variables (Settings > CI/CD > Variables):
 #   GITLAB_TOKEN  - a project/group access token with `api` scope (masked + protected)
 #   VLLM_BASE_URL - internal vLLM endpoint, e.g. http://vllm.internal.svc:8000/v1
 #   VLLM_MODEL    - served model name, e.g. Qwen2.5-Coder-32B-Instruct
 #
-# Optional: VLLM_API_KEY, VLLM_TIMEOUT, VLLM_MAX_TOKENS, VLLM_TEMPERATURE.
+# Optional: VLLM_API_KEY, VLLM_TIMEOUT, VLLM_MAX_TOKENS, VLLM_TEMPERATURE,
+#           DESCRIBE_LANGUAGE (default: Korean).
 #
 # Optional: commit a .gitlab/review-bot.yml file to the project being
 # reviewed (see examples/review-bot.example.yml) to exclude branches,
 # authors, or paths, and to add custom review instructions.
 
-ai_code_review:
-  image: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+.review_bot_base: &review_bot_base
+  image:
+    name: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+    entrypoint: [""]
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - gitlab-review-bot
   variables:
     GITLAB_URL: "$CI_SERVER_URL"
   allow_failure: true
+
+# Posts inline review comments and a summary note on the merge request.
+ai_code_review:
+  <<: *review_bot_base
+  script:
+    - gitlab-review-bot
+
+# Fills in the merge request title/description generated from the diff.
+# By default only fills what is still empty or auto-generated; add the
+# `ai:describe` label (or `/ai-describe` in the description) to append a
+# generated summary alongside text a human already wrote.
+ai_mr_describe:
+  <<: *review_bot_base
+  script:
+    - gitlab-mr-describe

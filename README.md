@@ -5,24 +5,35 @@
 환경을 위해 만들어졌으며, **외부 API를 호출하지 않고 사내 vLLM 엔드포인트만
 사용**합니다.
 
+## 기능
+
+두 개의 CLI(=CI job)를 제공합니다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `gitlab-review-bot` | MR diff를 리뷰해 **인라인 코멘트 + 요약 노트** 게시 |
+| `gitlab-mr-describe` | MR diff로 **제목/설명 자동 생성** |
+
 ## 동작 방식
 
 1. GitLab CI/CD 파이프라인이 MR 이벤트(`merge_request_event`)에서 트리거됩니다.
 2. 봇이 GitLab REST API로 MR의 diff를 가져옵니다.
-3. diff를 내부 vLLM 서비스(`/v1/chat/completions`)에 보내 구조화된(JSON) 리뷰를 받습니다.
-4. 문제가 있는 라인에는 인라인 코멘트를, 전체 요약은 MR에 노트로 등록합니다.
-5. 같은 커밋(head SHA)에 대해서는 중복으로 리뷰하지 않습니다.
+3. diff를 내부 vLLM 서비스(`/v1/chat/completions`)에 보내 구조화된(JSON) 응답을 받습니다.
+4. 리뷰는 인라인 코멘트 + 요약 노트로, 제목/설명은 MR 업데이트로 반영됩니다.
+5. 리뷰는 같은 커밋(head SHA)에 대해 중복 실행되지 않습니다.
 
 ## 저장소 구조
 
 ```
 review_bot/
-├── cli.py            # 진입점: 전체 리뷰 플로우 오케스트레이션
-├── config.py          # 환경변수 기반 설정 로딩
-├── gitlab_client.py   # GitLab REST API 래퍼 (MR 조회, diff, 노트/디스커션 게시)
+├── cli.py             # 진입점(리뷰): gitlab-review-bot
+├── describe_cli.py     # 진입점(제목/설명): gitlab-mr-describe + 덮어쓰기 정책
+├── config.py           # 환경변수 기반 설정 로딩
+├── gitlab_client.py    # GitLab REST API 래퍼 (MR 조회/수정, diff, 코멘트)
 ├── diff_parser.py      # unified diff 파싱 → 인라인 코멘트 가능한 라인 계산
 ├── exclude_rules.py    # .gitlab/review-bot.yml 예외 규칙 로딩/매칭
-├── reviewer.py         # vLLM(OpenAI 호환) 호출 및 JSON 응답 파싱
+├── reviewer.py         # 리뷰 생성 (vLLM 호출 + JSON 파싱)
+├── describe.py         # 제목/설명 생성 (vLLM 호출 + JSON 파싱)
 └── prompts.py          # 시스템/유저 프롬프트 템플릿
 
 .gitlab-ci.yml           # 리뷰 대상 프로젝트에 붙여 넣거나 include할 CI job 템플릿
@@ -81,19 +92,50 @@ GitLab Runner가 harbor에서 이 이미지를 pull할 수 있어야 합니다. 
 job 정의를 프로젝트 `.gitlab-ci.yml`에 복사해서 사용합니다.
 
 ```yaml
-ai_code_review:
-  image: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+.review_bot_base: &review_bot_base
+  image:
+    name: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+    entrypoint: [""]
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - gitlab-review-bot
   variables:
     GITLAB_URL: "$CI_SERVER_URL"
   allow_failure: true
+
+ai_code_review:
+  <<: *review_bot_base
+  script:
+    - gitlab-review-bot
+
+ai_mr_describe:
+  <<: *review_bot_base
+  script:
+    - gitlab-mr-describe
 ```
 
-이러면 harbor에서 이미지만 pull해서 바로 `gitlab-review-bot`을 실행 →
-리뷰 → 종료합니다. MR 이벤트에서만 트리거됩니다.
+harbor에서 이미지만 pull해서 바로 실행 → 종료합니다. MR 이벤트에서만
+트리거됩니다. 이미지에 `ENTRYPOINT`가 정의돼 있으므로 `entrypoint: [""]`로
+덮어써야 `script:` 블록이 정상 실행됩니다.
+
+필요한 job만 골라서 넣어도 됩니다 (리뷰만 원하면 `ai_code_review`만).
+
+## MR 제목/설명 자동 생성 정책
+
+`gitlab-mr-describe`는 **사람이 쓴 내용을 함부로 덮어쓰지 않습니다.**
+
+| 상황 | 동작 |
+|---|---|
+| 제목이 아직 자동 생성 상태 (브랜치명 유래, 또는 단일 커밋 제목과 동일) | 생성된 제목으로 교체 |
+| 제목을 사람이 직접 작성함 | **그대로 둠** |
+| 설명이 비어있음 | 생성된 설명으로 채움 |
+| 설명을 사람이 작성함 | **그대로 둠** (기본 모드) |
+| `ai:describe` 라벨 또는 설명에 `/ai-describe` 포함 | 기존 설명 **뒤에 이어서** AI 섹션 추가 |
+
+- 추가되는 섹션은 `<!-- ai-describe:start -->` / `<!-- ai-describe:end -->`
+  마커로 감싸지므로, 재실행 시 **중복 추가되지 않고 해당 블록만 갱신**됩니다.
+- `Draft:` / `WIP:` 접두사는 제목 교체 시에도 유지됩니다.
+- 설명 생성 언어는 `DESCRIBE_LANGUAGE` (기본 `Korean`)로 바꿀 수 있습니다.
+- `.gitlab/review-bot.yml`의 브랜치/작성자/경로 제외 규칙이 동일하게 적용됩니다.
 
 ### 6. (선택) 프로젝트별 예외/커스텀 지시사항 설정
 
@@ -117,7 +159,11 @@ export CI_MERGE_REQUEST_IID=45
 export VLLM_BASE_URL=http://vllm.internal.svc.cluster.local:8000/v1
 export VLLM_MODEL=Qwen2.5-Coder-32B-Instruct
 
+# 리뷰 실행
 python -m review_bot.cli
+
+# MR 제목/설명 생성 실행
+python -m review_bot.describe_cli
 ```
 
 `.env.example`을 참고해 필요한 값을 채워 넣으세요.
@@ -132,7 +178,8 @@ python -m review_bot.cli
 | `VLLM_TIMEOUT` | `120` | 요청 타임아웃(초) |
 | `VLLM_MAX_TOKENS` | `4096` | 응답 최대 토큰 수 |
 | `VLLM_TEMPERATURE` | `0.2` | 샘플링 temperature |
-| `MAX_DIFF_CHARS` | `60000` | 한 번의 리뷰 요청에 포함할 diff 총 글자수 상한 |
+| `DESCRIBE_LANGUAGE` | `Korean` | 생성되는 MR 제목/설명의 언어 |
+| `MAX_DIFF_CHARS` | `60000` | 한 번의 요청에 포함할 diff 총 글자수 상한 |
 | `MAX_COMMENTS` | `25` | MR 하나당 게시할 최대 인라인 코멘트 수 |
 | `POST_INLINE_COMMENTS` | `true` | 인라인 코멘트 게시 여부 |
 | `POST_SUMMARY_COMMENT` | `true` | 요약 노트 게시 여부 |
