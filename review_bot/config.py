@@ -9,6 +9,7 @@ Defaults target Qwen/Qwen3.6-35B-A3B-FP8 served by vLLM.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -71,9 +72,9 @@ class Config:
 
         timeout = int(_env("VLLM_TIMEOUT", "600"))
         if timeout < MIN_TIMEOUT_SECONDS:
-            print(
-                f"[config] VLLM_TIMEOUT={timeout}s is below the {MIN_TIMEOUT_SECONDS}s minimum; "
-                f"using {MIN_TIMEOUT_SECONDS}s."
+            logging.getLogger("review_bot.config").warning(
+                "VLLM_TIMEOUT=%ss is below the %ss minimum; using %ss",
+                timeout, MIN_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS,
             )
             timeout = MIN_TIMEOUT_SECONDS
 

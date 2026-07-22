@@ -24,8 +24,10 @@ Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
 """
 from __future__ import annotations
 
+import logging
 import re
 import sys
+import time
 from typing import List, Optional
 
 from .batching import FileChange, batch, estimate_tokens, prepare
@@ -34,6 +36,7 @@ from .diff_parser import added_line_numbers
 from .describe import MRDescriber
 from .exclude_rules import ReviewRules
 from .gitlab_client import GitLabClient
+from .logging_setup import setup_logging, shutdown_logging
 
 MARKER_START = "<!-- ai-describe:start -->"
 MARKER_END = "<!-- ai-describe:end -->"
@@ -45,11 +48,12 @@ _NORMALIZE_RE = re.compile(r"[^0-9a-z\uac00-\ud7a3]+")
 _LEADING_ID_RE = re.compile(r"^\d+[-_]")
 
 
-def main() -> int:
+def _run(log: logging.Logger) -> int:
+    started = time.monotonic()
     try:
         cfg = Config.from_env()
     except ConfigError as exc:
-        print(f"[mr-describe] configuration error: {exc}", file=sys.stderr)
+        log.error("configuration error: %s", exc)
         return 1
 
     client = GitLabClient(cfg.gitlab_url, cfg.gitlab_token, cfg.project_id, cfg.mr_iid)
@@ -69,26 +73,31 @@ def main() -> int:
     description_is_empty = not existing_description.strip()
 
     if not opt_in and not title_is_auto and not description_is_empty:
-        print("[mr-describe] title and description were both written by a human, nothing to do.")
+        log.info("title and description were both written by a human, nothing to do",
+                 extra={"fields": {"skipped": "human_authored"}})
         return 0
 
     rules = ReviewRules.load(cfg.project_dir / cfg.config_path)
     if rules.skip_mr(mr.get("target_branch", ""), mr.get("source_branch", ""), (mr.get("author") or {}).get("username", "")):
-        print("[mr-describe] merge request matches an exclude rule, skipping.")
+        log.info("merge request matches an exclude rule, skipping",
+                 extra={"fields": {"skipped": "exclude_rule"}})
         return 0
 
     collected = _collect_changes(client, rules)
     if not collected:
-        print("[mr-describe] no reviewable file changes found, skipping.")
+        log.info("no reviewable file changes found, skipping",
+                 extra={"fields": {"skipped": "no_changes"}})
         return 0
 
     ranked = prepare(collected, cfg.max_file_diff_chars)
     batches, dropped = batch(ranked, cfg.max_diff_chars, cfg.max_batches)
     total_chars = sum(c.size for group in batches for c in group)
-    print(
-        f"[mr-describe] {len(collected)} file(s) -> {len(batches)} batch(es), "
-        f"~{estimate_tokens(total_chars)} tokens"
-        + (f", {len(dropped)} beyond budget" if dropped else "")
+    log.info(
+        "planned description of %d file(s) in %d batch(es)", len(collected), len(batches),
+        extra={"fields": {
+            "files": len(collected), "batches": len(batches),
+            "estimated_tokens": estimate_tokens(total_chars), "dropped_files": len(dropped),
+        }},
     )
 
     describer = MRDescriber(cfg.llm, language=cfg.describe_language)
@@ -106,7 +115,10 @@ def main() -> int:
         # Hierarchical summarization: notes per batch, then one synthesis pass.
         notes = []
         for index, group in enumerate(batches, 1):
-            print(f"[mr-describe] summarizing batch {index}/{len(batches)} ({len(group)} file(s))")
+            log.info(
+                "summarizing batch %d/%d", index, len(batches),
+                extra={"fields": {"batch": index, "batches": len(batches), "files": len(group)}},
+            )
             notes.append(
                 describer.summarize_batch(
                     source_branch=source_branch,
@@ -134,15 +146,32 @@ def main() -> int:
             new_description = _wrap(generated.description)
 
     if new_title is None and new_description is None:
-        print("[mr-describe] nothing to update.")
+        log.info("nothing to update", extra={"fields": {"skipped": "nothing_generated"}})
         return 0
 
     client.update_mr(title=new_title, description=new_description)
-    print(
-        f"[mr-describe] updated: title={'yes' if new_title else 'no'}, "
-        f"description={'yes' if new_description else 'no'} (mode={'append' if opt_in else 'fill'})"
+    log.info(
+        "merge request updated (mode=%s)", "append" if opt_in else "fill",
+        extra={"fields": {
+            "mode": "append" if opt_in else "fill",
+            "title_updated": bool(new_title),
+            "description_updated": bool(new_description),
+            "batches": len(batches),
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }},
     )
     return 0
+
+
+def main() -> int:
+    log = setup_logging("describe")
+    try:
+        return _run(log)
+    except Exception:
+        log.exception("description generation failed with an unhandled error")
+        return 1
+    finally:
+        shutdown_logging()
 
 
 def _collect_changes(client: GitLabClient, rules: ReviewRules) -> List[FileChange]:

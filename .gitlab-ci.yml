@@ -23,6 +23,11 @@
 # Optional: VLLM_API_KEY, VLLM_TIMEOUT, VLLM_MAX_TOKENS, VLLM_TEMPERATURE,
 #           DESCRIBE_LANGUAGE (default: Korean).
 #
+# Logging: JSON lines go to stdout. Under the Kubernetes executor's default
+# `attach` strategy that is also the build container's stdout, so an
+# Alloy/Promtail pod-log scrape collects it. Set LOKI_URL to additionally push
+# straight to Loki, which does not depend on the runner's strategy.
+#
 # Optional: commit a .gitlab/review-bot.yml file to the project being
 # reviewed (see examples/review-bot.example.yml) to exclude branches,
 # authors, or paths, and to add custom review instructions.
@@ -35,6 +40,10 @@
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   variables:
     GITLAB_URL: "$CI_SERVER_URL"
+    LOG_FORMAT: "json"
+    # LOKI_URL: "http://loki.monitoring.svc.cluster.local:3100"
+    # LOKI_TENANT: ""
+    # LOKI_EXTRA_LABELS: "env=prod"
   allow_failure: true
 
 # Posts inline review comments and a summary note on the merge request.

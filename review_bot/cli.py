@@ -12,7 +12,9 @@ Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
 """
 from __future__ import annotations
 
+import logging
 import sys
+import time
 from typing import Dict, List
 
 from .config import Config, ConfigError
@@ -20,34 +22,36 @@ from .batching import FileChange, batch, estimate_tokens, prepare
 from .diff_parser import addable_lines, added_line_numbers
 from .exclude_rules import ReviewRules
 from .gitlab_client import GitLabClient
+from .logging_setup import setup_logging, shutdown_logging
 from .reviewer import ReviewResult, VLLMReviewer
 
 MARKER_PREFIX = "<!-- ai-review-bot:head_sha="
 
 
-def main() -> int:
+def _run(log: logging.Logger) -> int:
+    started = time.monotonic()
     try:
         cfg = Config.from_env()
     except ConfigError as exc:
-        print(f"[review-bot] configuration error: {exc}", file=sys.stderr)
+        log.error("configuration error: %s", exc)
         return 1
 
     client = GitLabClient(cfg.gitlab_url, cfg.gitlab_token, cfg.project_id, cfg.mr_iid)
     mr = client.get_mr()
 
     if mr.get("draft") or mr.get("work_in_progress"):
-        print("[review-bot] merge request is a draft, skipping review.")
+        log.info("merge request is a draft, skipping review", extra={"fields": {"skipped": "draft"}})
         return 0
 
     head_sha = mr["diff_refs"]["head_sha"]
     if _already_reviewed(client, head_sha):
-        print(f"[review-bot] head commit {head_sha} was already reviewed, skipping.")
+        log.info("head commit already reviewed, skipping", extra={"fields": {"skipped": "duplicate", "head_sha": head_sha}})
         return 0
 
     rules = ReviewRules.load(cfg.project_dir / cfg.config_path)
     author_username = (mr.get("author") or {}).get("username", "")
     if rules.skip_mr(mr["target_branch"], mr["source_branch"], author_username):
-        print("[review-bot] merge request matches an exclude rule, skipping.")
+        log.info("merge request matches an exclude rule, skipping", extra={"fields": {"skipped": "exclude_rule"}})
         return 0
 
     collected: List[FileChange] = []
@@ -61,18 +65,20 @@ def main() -> int:
         collected.append(FileChange(path=new_path, diff=diff_text, added_lines=added_line_numbers(diff_text)))
 
     if not collected:
-        print("[review-bot] no reviewable file changes found, skipping.")
+        log.info("no reviewable file changes found, skipping", extra={"fields": {"skipped": "no_changes"}})
         return 0
 
     ranked = prepare(collected, cfg.max_file_diff_chars)
     batches, dropped = batch(ranked, cfg.max_diff_chars, cfg.max_batches)
     truncated = [c.path for c in ranked if c.truncated]
     total_chars = sum(c.size for group in batches for c in group)
-    print(
-        f"[review-bot] {len(collected)} file(s) -> {len(batches)} batch(es), "
-        f"~{estimate_tokens(total_chars)} tokens"
-        + (f", {len(truncated)} truncated" if truncated else "")
-        + (f", {len(dropped)} beyond budget" if dropped else "")
+    log.info(
+        "planned review of %d file(s) in %d batch(es)", len(collected), len(batches),
+        extra={"fields": {
+            "files": len(collected), "batches": len(batches),
+            "estimated_tokens": estimate_tokens(total_chars),
+            "truncated_files": len(truncated), "dropped_files": len(dropped),
+        }},
     )
 
     reviewer = VLLMReviewer(cfg.llm)
@@ -93,7 +99,10 @@ def main() -> int:
                 "diff": change.diff,
                 "commentable_lines": added_line_numbers(change.diff),
             })
-        print(f"[review-bot] reviewing batch {index}/{len(batches)} ({len(group)} file(s))")
+        log.info(
+            "reviewing batch %d/%d", index, len(batches),
+            extra={"fields": {"batch": index, "batches": len(batches), "files": len(group)}},
+        )
         partial = reviewer.review(
             title=mr.get("title", ""),
             description=mr.get("description", ""),
@@ -150,11 +159,30 @@ def main() -> int:
                 summary_lines.append(f"- `{change.path}` exceeded the review budget and was not reviewed.")
         client.post_note("\n".join(summary_lines))
 
-    print(
-        f"[review-bot] review complete: {posted_inline} inline comment(s), "
-        f"summary posted={cfg.post_summary_comment}"
+    log.info(
+        "review complete: %d inline comment(s) posted", posted_inline,
+        extra={"fields": {
+            "inline_comments": posted_inline,
+            "skipped_comments": len(skipped_comments),
+            "summary_posted": cfg.post_summary_comment,
+            "batches": len(batches),
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }},
     )
     return 0
+
+
+def main() -> int:
+    log = setup_logging("review")
+    started_at = time.monotonic()
+    try:
+        return _run(log)
+    except Exception:
+        log.exception("review failed with an unhandled error")
+        return 1
+    finally:
+        log.debug("run finished in %.2fs", time.monotonic() - started_at)
+        shutdown_logging()
 
 
 def _already_reviewed(client: GitLabClient, head_sha: str) -> bool:

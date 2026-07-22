@@ -34,6 +34,7 @@ review_bot/
 ├── exclude_rules.py    # .gitlab/review-bot.yml 예외 규칙 로딩/매칭
 ├── llm.py              # vLLM 공통 전송 (샘플링 파라미터, thinking 처리, JSON 파싱)
 ├── batching.py         # 큰 diff 처리 (우선순위 랭킹 / 잘라내기 / 배치 분할)
+├── logging_setup.py    # 구조화 로깅 (JSON stdout / Loki push / 시크릿 마스킹)
 ├── reviewer.py         # 리뷰 생성
 ├── describe.py         # 제목/설명 생성
 └── prompts.py          # 시스템/유저 프롬프트 템플릿
@@ -220,6 +221,69 @@ python -m review_bot.describe_cli
 | `POST_INLINE_COMMENTS` | `true` | 인라인 코멘트 게시 여부 |
 | `POST_SUMMARY_COMMENT` | `true` | 요약 노트 게시 여부 |
 | `REVIEW_BOT_CONFIG_PATH` | `.gitlab/review-bot.yml` | 예외 규칙 파일 경로 (프로젝트 루트 기준) |
+| `LOG_FORMAT` | `json` | `json` 또는 `text` |
+| `LOG_LEVEL` | `INFO` | 로그 레벨 |
+| `LOKI_URL` | (없음) | 설정 시 Loki에 직접 push (예: `http://loki.monitoring.svc:3100`) |
+| `LOKI_TENANT` | (없음) | 멀티테넌트 Loki의 `X-Scope-OrgID` |
+| `LOKI_EXTRA_LABELS` | (없음) | 추가 라벨. `env=prod,cluster=kodata-ai` 형식 |
+| `LOKI_TIMEOUT` | `10` | Loki push 타임아웃(초) |
+
+## 로깅 / 관측성 (Alloy + Loki)
+
+로그는 **JSON 한 줄씩 stdout**으로 나갑니다. 수집 경로는 두 가지입니다.
+
+### 1. stdout → Alloy 파드 로그 수집 (기본)
+
+Kubernetes executor의 기본 실행 전략인 **`attach`** 에서는 job의 출력이
+build 컨테이너의 stdout이기도 해서, `kodata-gitlab` 네임스페이스의
+`runner-*` 파드 로그로 잡히고 Alloy가 그대로 수집합니다.
+
+> ⚠️ **예외**: `FF_USE_LEGACY_KUBERNETES_EXECUTION_STRATEGY=true`(legacy `exec`
+> 전략)이면 출력이 `kube exec` 스트림으로만 가고 컨테이너 stdout에 남지
+> 않아 **파드 로그로 수집되지 않습니다.** 이 경우 아래 2번을 쓰세요.
+
+확인 방법:
+```bash
+kubectl -n kodata-gitlab logs -l job-name --tail=50 -c build
+```
+
+### 2. Loki 직접 push (권장, 런너 설정과 무관)
+
+`LOKI_URL`만 설정하면 봇이 Loki HTTP API로 직접 push합니다. 실행 전략이나
+파드 수명과 무관하게 항상 전달됩니다.
+
+```yaml
+variables:
+  LOKI_URL: "http://loki.monitoring.svc.cluster.local:3100"
+```
+
+### 라벨 설계
+
+Loki의 **cardinality 폭발을 피하기 위해** 라벨은 낮은 카디널리티만 씁니다.
+
+| | 값 |
+|---|---|
+| **라벨** (스트림) | `service_name`, `job`, `component`(review\|describe), `project`, + `LOKI_EXTRA_LABELS` |
+| **로그 필드** (라인 내부) | `mr_iid`, `pipeline_id`, `job_id`, `commit_sha`, `ref`, `files`, `batches`, `estimated_tokens`, `duration_seconds` 등 |
+
+MR iid나 커밋 SHA처럼 값이 계속 늘어나는 항목은 라벨이 아니라 JSON 필드로
+들어갑니다. Grafana에서는 `| json` 파서로 필터링하면 됩니다.
+
+```logql
+{service_name="gitlab-review-bot"} | json | mr_iid="123"
+{service_name="gitlab-review-bot", component="review"} | json | level="ERROR"
+{service_name="gitlab-review-bot"} | json | duration_seconds > 120
+```
+
+### 시크릿 마스킹
+
+로그가 Loki로 나가므로 **자격 증명 패턴을 자동으로 마스킹**합니다
+(`glpat-*`, `github_pat_*`, `gh[pousr]_*`, `Bearer ...`,
+`token=`/`password=`/`PRIVATE-TOKEN:` 형태의 키-값). diff 내용은 애초에
+로그로 남기지 않습니다.
+
+Loki가 죽어 있어도 push 실패는 stderr 경고 한 줄로 끝나고 **job은 그대로
+진행**됩니다.
 
 ## 보안 참고사항
 
