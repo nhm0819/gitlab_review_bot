@@ -28,7 +28,9 @@ import re
 import sys
 from typing import List, Optional
 
+from .batching import FileChange, batch, estimate_tokens, prepare
 from .config import Config, ConfigError
+from .diff_parser import added_line_numbers
 from .describe import MRDescriber
 from .exclude_rules import ReviewRules
 from .gitlab_client import GitLabClient
@@ -75,18 +77,50 @@ def main() -> int:
         print("[mr-describe] merge request matches an exclude rule, skipping.")
         return 0
 
-    file_blocks = _collect_file_blocks(client, rules, cfg.max_diff_chars)
-    if not file_blocks:
+    collected = _collect_changes(client, rules)
+    if not collected:
         print("[mr-describe] no reviewable file changes found, skipping.")
         return 0
 
-    describer = MRDescriber(cfg.llm, language=cfg.describe_language)
-    generated = describer.describe(
-        source_branch=mr.get("source_branch", ""),
-        target_branch=mr.get("target_branch", ""),
-        commit_subjects=commit_subjects,
-        file_blocks=file_blocks,
+    ranked = prepare(collected, cfg.max_file_diff_chars)
+    batches, dropped = batch(ranked, cfg.max_diff_chars, cfg.max_batches)
+    total_chars = sum(c.size for group in batches for c in group)
+    print(
+        f"[mr-describe] {len(collected)} file(s) -> {len(batches)} batch(es), "
+        f"~{estimate_tokens(total_chars)} tokens"
+        + (f", {len(dropped)} beyond budget" if dropped else "")
     )
+
+    describer = MRDescriber(cfg.llm, language=cfg.describe_language)
+    source_branch = mr.get("source_branch", "")
+    target_branch = mr.get("target_branch", "")
+
+    if len(batches) == 1:
+        generated = describer.describe(
+            source_branch=source_branch,
+            target_branch=target_branch,
+            commit_subjects=commit_subjects,
+            file_blocks=[{"path": c.path, "diff": c.diff} for c in batches[0]],
+        )
+    else:
+        # Hierarchical summarization: notes per batch, then one synthesis pass.
+        notes = []
+        for index, group in enumerate(batches, 1):
+            print(f"[mr-describe] summarizing batch {index}/{len(batches)} ({len(group)} file(s))")
+            notes.append(
+                describer.summarize_batch(
+                    source_branch=source_branch,
+                    target_branch=target_branch,
+                    commit_subjects=commit_subjects,
+                    file_blocks=[{"path": c.path, "diff": c.diff} for c in group],
+                )
+            )
+        generated = describer.synthesize(
+            source_branch=source_branch,
+            target_branch=target_branch,
+            commit_subjects=commit_subjects,
+            notes=notes,
+        )
 
     new_title: Optional[str] = None
     if title_is_auto and generated.title:
@@ -111,19 +145,15 @@ def main() -> int:
     return 0
 
 
-def _collect_file_blocks(client: GitLabClient, rules: ReviewRules, max_diff_chars: int) -> List[dict]:
-    blocks: List[dict] = []
-    total = 0
+def _collect_changes(client: GitLabClient, rules: ReviewRules) -> List[FileChange]:
+    changes: List[FileChange] = []
     for change in client.get_mr_changes():
         path = change.get("new_path") or change.get("old_path")
         diff = change.get("diff", "")
         if not path or not diff or rules.skip_path(path):
             continue
-        if total + len(diff) > max_diff_chars:
-            break
-        total += len(diff)
-        blocks.append({"path": path, "diff": diff})
-    return blocks
+        changes.append(FileChange(path=path, diff=diff, added_lines=added_line_numbers(diff)))
+    return changes
 
 
 def _normalize(text: str) -> str:

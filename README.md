@@ -33,6 +33,7 @@ review_bot/
 ├── diff_parser.py      # unified diff 파싱 → 인라인 코멘트 가능한 라인 계산
 ├── exclude_rules.py    # .gitlab/review-bot.yml 예외 규칙 로딩/매칭
 ├── llm.py              # vLLM 공통 전송 (샘플링 파라미터, thinking 처리, JSON 파싱)
+├── batching.py         # 큰 diff 처리 (우선순위 랭킹 / 잘라내기 / 배치 분할)
 ├── reviewer.py         # 리뷰 생성
 ├── describe.py         # 제목/설명 생성
 └── prompts.py          # 시스템/유저 프롬프트 템플릿
@@ -172,6 +173,31 @@ python -m review_bot.describe_cli
 
 `.env.example`을 참고해 필요한 값을 채워 넣으세요.
 
+## 큰 diff 처리 방식
+
+파일이 많거나 대규모 교체가 일어나 diff가 컨텍스트를 넘으면, **남은 파일을
+버리지 않고** 아래 순서로 처리합니다.
+
+1. **우선순위 랭킹** — 소스 코드를 lockfile·minified 번들·생성 코드
+   (`*.lock`, `*.min.js`, `*_pb2.py`, `vendor/`, `dist/` 등)보다 앞에 둡니다.
+   점수는 추가된 줄 수 기반이되 상한이 있어서, 거대한 파일 하나가 예산을
+   독차지하지 못합니다.
+2. **파일 단위 잘라내기** — 파일 하나가 `MAX_FILE_DIFF_CHARS`를 넘으면
+   통째로 버리는 대신 **hunk 경계에서 잘라내고** 잘렸다는 사실을 표시합니다.
+3. **배치 분할 (map)** — 남은 파일들을 컨텍스트에 맞는 여러 요청으로 나눠
+   각각 리뷰합니다. 인라인 코멘트는 배치별로 그대로 게시됩니다.
+4. **결과 병합 (reduce)** — 배치별 요약을 한 번 더 호출해 **하나의 일관된
+   요약으로 합칩니다.** 제목/설명 생성도 동일하게 배치별 노트를 만든 뒤
+   최종 합성(hierarchical summarization)합니다.
+5. **누락 보고** — `MAX_BATCHES`까지 써도 담지 못한 파일은 조용히 무시하지
+   않고 요약 코멘트의 **Coverage** 항목에 명시합니다.
+
+인라인 코멘트는 **모델이 실제로 본 diff**에서 계산한 줄 번호에만 달리므로,
+잘린 파일에서 보지 못한 줄에 코멘트가 달리는 일은 없습니다.
+
+한 번에 다 들어가는 크기라면 배치·병합 단계는 건너뛰므로 **불필요한 LLM
+호출이 추가되지 않습니다.**
+
 ## 설정 가능한 환경변수
 
 | 변수 | 기본값 | 설명 |
@@ -187,7 +213,9 @@ python -m review_bot.describe_cli
 | `VLLM_PRESENCE_PENALTY` | `0.0` | 〃 |
 | `VLLM_ENABLE_THINKING` | `true` | `false`면 thinking 비활성화(빠름/저비용) |
 | `DESCRIBE_LANGUAGE` | `Korean` | 생성되는 MR 제목/설명의 언어 |
-| `MAX_DIFF_CHARS` | `200000` | diff 총 글자수 상한 (262K 컨텍스트 기준) |
+| `MAX_DIFF_CHARS` | `200000` | **요청 1회당** diff 글자수 예산 |
+| `MAX_FILE_DIFF_CHARS` | `40000` | 파일 1개당 상한. 초과 시 hunk 경계에서 잘림 |
+| `MAX_BATCHES` | `8` | 최대 배치(=LLM 호출) 수. 초과분은 보고됨 |
 | `MAX_COMMENTS` | `25` | MR 하나당 게시할 최대 인라인 코멘트 수 |
 | `POST_INLINE_COMMENTS` | `true` | 인라인 코멘트 게시 여부 |
 | `POST_SUMMARY_COMMENT` | `true` | 요약 노트 게시 여부 |

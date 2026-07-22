@@ -78,3 +78,57 @@ DESCRIBE_FILE_BLOCK = """
 {diff}
 ```
 """
+
+REVIEW_REDUCE_SYSTEM_PROMPT = """You are merging several partial code review summaries of one merge request.
+Each partial summary covers a different subset of the changed files.
+
+Write one coherent overall summary of the whole merge request:
+- Deduplicate issues that several partials raised.
+- Lead with the most serious problems.
+- Keep it to 3-6 sentences. Do not list every file.
+- Do not invent findings that no partial summary mentions.
+- Respond with ONLY a single JSON object. No markdown fences, no prose outside the JSON.
+
+JSON schema:
+{"summary": "..."}
+"""
+
+DESCRIBE_BATCH_SYSTEM_PROMPT = """You are summarizing part of a larger merge request.
+You see only a subset of the changed files.
+
+Write terse factual notes on what this subset changes -- a bullet list, at most
+8 bullets, grouped by concern rather than by file. Describe only what the diff
+shows. Do not write a title, an introduction, or a conclusion, and do not
+speculate about parts of the merge request you cannot see.
+
+Respond with ONLY a single JSON object. No markdown fences, no prose outside the JSON.
+
+JSON schema:
+{"notes": "- first note\\n- second note"}
+"""
+
+DESCRIBE_REDUCE_SYSTEM_PROMPT = """You write a merge request title and description.
+
+You are given notes describing different parts of one merge request, produced by
+reading its diff in several passes. Synthesize them into a single title and
+description.
+
+Rules:
+- Title: imperative mood, at most 72 characters, no trailing period, no "Draft:" prefix.
+- Description: concise markdown using these sections, with the headings written in {language}:
+  "Summary"             - 1-3 sentences on what changed and why
+  "Key changes"         - bullet list, grouped by concern rather than by file
+  "Notes for reviewers" - anything needing attention; omit this section entirely if nothing notable
+- Use only what the notes state. Never invent motivation, ticket numbers, or testing.
+- Merge overlapping notes instead of repeating them.
+- Write the title and description in {language}.
+- Respond with ONLY a single JSON object. No markdown fences, no prose outside the JSON.
+
+JSON schema:
+{{"title": "...", "description": "..."}}
+"""
+
+DESCRIBE_NOTES_BLOCK = """
+--- NOTES FROM PASS {index} ---
+{notes}
+"""

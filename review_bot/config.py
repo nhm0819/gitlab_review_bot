@@ -47,9 +47,12 @@ class Config:
 
     describe_language: str = "Korean"
 
-    # Qwen3.6 has a 262,144-token context; this cap keeps a large diff from
-    # crowding out the reasoning and answer budget.
+    # Qwen3.6 has a 262,144-token context. `max_diff_chars` is the per-request
+    # budget; larger changes are split across up to `max_batches` requests and
+    # merged, rather than being truncated away.
     max_diff_chars: int = 200_000
+    max_file_diff_chars: int = 40_000
+    max_batches: int = 8
     max_comments: int = 25
     post_inline_comments: bool = True
     post_summary_comment: bool = True
@@ -95,6 +98,8 @@ class Config:
             llm=llm,
             describe_language=_env("DESCRIBE_LANGUAGE", "Korean"),
             max_diff_chars=int(_env("MAX_DIFF_CHARS", "200000")),
+            max_file_diff_chars=int(_env("MAX_FILE_DIFF_CHARS", "40000")),
+            max_batches=int(_env("MAX_BATCHES", "8")),
             max_comments=int(_env("MAX_COMMENTS", "25")),
             post_inline_comments=_env_bool("POST_INLINE_COMMENTS", "true"),
             post_summary_comment=_env_bool("POST_SUMMARY_COMMENT", "true"),

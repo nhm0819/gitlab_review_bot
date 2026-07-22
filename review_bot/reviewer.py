@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from .llm import LLMSettings, build_client, complete_json
-from .prompts import FILE_BLOCK, SYSTEM_PROMPT, USER_PROMPT_HEADER
+from .prompts import FILE_BLOCK, REVIEW_REDUCE_SYSTEM_PROMPT, SYSTEM_PROMPT, USER_PROMPT_HEADER
 
 
 @dataclass
@@ -62,3 +62,14 @@ class VLLMReviewer:
             if c.get("file") and c.get("line") and c.get("comment")
         ]
         return ReviewResult(summary=str(data.get("summary", "")).strip(), comments=comments)
+
+    def reduce_summaries(self, summaries: List[str]) -> str:
+        """Merge per-batch summaries into one (the reduce step of map-reduce)."""
+        usable = [s.strip() for s in summaries if s.strip()]
+        if not usable:
+            return ""
+        if len(usable) == 1:
+            return usable[0]
+        prompt = "\n\n".join(f"--- PARTIAL SUMMARY {i} ---\n{s}" for i, s in enumerate(usable, 1))
+        data = complete_json(self._client, self._settings, REVIEW_REDUCE_SYSTEM_PROMPT, prompt)
+        return str(data.get("summary", "")).strip()

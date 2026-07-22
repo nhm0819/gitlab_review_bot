@@ -13,13 +13,14 @@ Run as a GitLab CI/CD job (see .gitlab-ci.yml) or locally for testing:
 from __future__ import annotations
 
 import sys
-from typing import Dict
+from typing import Dict, List
 
 from .config import Config, ConfigError
+from .batching import FileChange, batch, estimate_tokens, prepare
 from .diff_parser import addable_lines, added_line_numbers
 from .exclude_rules import ReviewRules
 from .gitlab_client import GitLabClient
-from .reviewer import VLLMReviewer
+from .reviewer import ReviewResult, VLLMReviewer
 
 MARKER_PREFIX = "<!-- ai-review-bot:head_sha="
 
@@ -49,42 +50,61 @@ def main() -> int:
         print("[review-bot] merge request matches an exclude rule, skipping.")
         return 0
 
-    changes = client.get_mr_changes()
-    file_blocks = []
-    line_lookup: Dict[str, Dict[int, str]] = {}
-    total_chars = 0
-
-    for change in changes:
+    collected: List[FileChange] = []
+    for change in client.get_mr_changes():
         new_path = change.get("new_path") or change.get("old_path")
-        if not new_path or change.get("deleted_file"):
-            continue
-        if rules.skip_path(new_path):
+        if not new_path or change.get("deleted_file") or rules.skip_path(new_path):
             continue
         diff_text = change.get("diff", "")
-        if not diff_text:
+        if not diff_text or not added_line_numbers(diff_text):
             continue
-        added = added_line_numbers(diff_text)
-        if not added:
-            continue
-        if total_chars + len(diff_text) > cfg.max_diff_chars:
-            print(f"[review-bot] diff budget exhausted, skipping remaining files starting at {new_path}")
-            break
-        total_chars += len(diff_text)
+        collected.append(FileChange(path=new_path, diff=diff_text, added_lines=added_line_numbers(diff_text)))
 
-        file_blocks.append({"path": new_path, "diff": diff_text, "commentable_lines": added})
-        line_lookup[new_path] = addable_lines(diff_text)
-
-    if not file_blocks:
+    if not collected:
         print("[review-bot] no reviewable file changes found, skipping.")
         return 0
 
-    reviewer = VLLMReviewer(cfg.llm)
-    result = reviewer.review(
-        title=mr.get("title", ""),
-        description=mr.get("description", ""),
-        custom_instructions=rules.custom_instructions,
-        file_blocks=file_blocks,
+    ranked = prepare(collected, cfg.max_file_diff_chars)
+    batches, dropped = batch(ranked, cfg.max_diff_chars, cfg.max_batches)
+    truncated = [c.path for c in ranked if c.truncated]
+    total_chars = sum(c.size for group in batches for c in group)
+    print(
+        f"[review-bot] {len(collected)} file(s) -> {len(batches)} batch(es), "
+        f"~{estimate_tokens(total_chars)} tokens"
+        + (f", {len(truncated)} truncated" if truncated else "")
+        + (f", {len(dropped)} beyond budget" if dropped else "")
     )
+
+    reviewer = VLLMReviewer(cfg.llm)
+    line_lookup: Dict[str, Dict[int, str]] = {}
+    all_comments = []
+    summaries = []
+
+    # Map: review each batch independently.
+    for index, group in enumerate(batches, 1):
+        file_blocks = []
+        for change in group:
+            # Commentable lines come from the (possibly truncated) diff the
+            # model actually saw, so it can never cite a line it was not shown.
+            visible = addable_lines(change.diff)
+            line_lookup[change.path] = visible
+            file_blocks.append({
+                "path": change.path,
+                "diff": change.diff,
+                "commentable_lines": added_line_numbers(change.diff),
+            })
+        print(f"[review-bot] reviewing batch {index}/{len(batches)} ({len(group)} file(s))")
+        partial = reviewer.review(
+            title=mr.get("title", ""),
+            description=mr.get("description", ""),
+            custom_instructions=rules.custom_instructions,
+            file_blocks=file_blocks,
+        )
+        all_comments.extend(partial.comments)
+        summaries.append(partial.summary)
+
+    # Reduce: merge the per-batch summaries into one.
+    result = ReviewResult(summary=reviewer.reduce_summaries(summaries), comments=all_comments)
 
     posted_inline = 0
     skipped_comments = []
@@ -120,6 +140,14 @@ def main() -> int:
             summary_lines.append("\n**Additional notes:**")
             for c in skipped_comments:
                 summary_lines.append(f"- `{c.file}` (line {c.line}, {c.severity}): {c.comment}")
+        if truncated or dropped:
+            summary_lines.append("\n**Coverage:**")
+            if len(batches) > 1:
+                summary_lines.append(f"- Reviewed in {len(batches)} passes and merged.")
+            for path in truncated:
+                summary_lines.append(f"- `{path}` was too large to include in full; only part of it was reviewed.")
+            for change in dropped:
+                summary_lines.append(f"- `{change.path}` exceeded the review budget and was not reviewed.")
         client.post_note("\n".join(summary_lines))
 
     print(
