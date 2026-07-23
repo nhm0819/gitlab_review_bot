@@ -4,17 +4,20 @@
 # access, matching how the review-bot image is consumed.
 #
 # If ruff is not mirrored yet, either:
-#   a) mirror it:  ghcr.io/astral-sh/ruff:<tag> -> harbor-ai.kodata.co.kr/library/ruff:<tag>
-#   b) or swap the image for python:3.12-slim and add
-#      `before_script: - pip install ruff==<version>` (needs egress).
+#   a) mirror it:  ghcr.io/astral-sh/ruff:<tag> -> harbor-ai.kodata.co.kr/astral-sh/ruff:<tag>
+#   b) or swap the image for harbor-ai.kodata.co.kr/library/python:3.12-slim
+#      and add `before_script: - pip install ruff==<version>` (needs egress).
 #
 # ruff runs with its default rule set; drop a [tool.ruff] section into
 # pyproject.toml to tune it.
+#
+# NOTE: this uses the `:latest` tag, so ruff's rule set can change silently
+# between pipeline runs. Pin to a specific tag once one is mirrored.
 
 .lint_base:
   stage: lint
   image:
-    name: harbor-ai.kodata.co.kr/library/ruff:0.14.0
+    name: harbor-ai.kodata.co.kr/astral-sh/ruff:latest
     entrypoint: [""]
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

@@ -15,8 +15,9 @@
 #       file: '/ci/review.gitlab-ci.yml'
 #       ref: main
 #
-# The jobs below deliberately declare no `stage:`, so they land in the default
-# `test` stage of whichever project includes this file.
+# The jobs below run in the `review` stage. Projects including this file
+# must declare a `review` stage (see the root .gitlab-ci.yml in this repo
+# for an example), or add one to their own `stages:` list.
 #
 # Required CI/CD variables (Settings > CI/CD > Variables):
 #   GITLAB_TOKEN  - a project/group access token with `api` scope.
@@ -40,8 +41,9 @@
 # authors, or paths, and to add custom review instructions.
 
 .review_bot_base: &review_bot_base
+  stage: review
   image:
-    name: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+    name: harbor-ai.kodata.co.kr/library/gitlab-review-bot:latest
     entrypoint: [""]
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

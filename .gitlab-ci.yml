@@ -15,6 +15,6 @@ include:
 
 stages:
   - lint
-  - test     # review jobs run here (default stage, kept implicit for portability)
+  - review
   - verify   # tag pipelines only
   - build    # tag pipelines only
