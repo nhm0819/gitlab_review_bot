@@ -16,7 +16,11 @@
 #       ref: main
 #
 # Required CI/CD variables (Settings > CI/CD > Variables):
-#   GITLAB_TOKEN  - a project/group access token with `api` scope (masked + protected)
+#   GITLAB_TOKEN  - a project/group access token with `api` scope.
+#                   Mask it, but do NOT tick "Protect variable": protected
+#                   variables are withheld from merge request pipelines unless
+#                   both source and target branches are protected, so the job
+#                   would fail with a missing GITLAB_TOKEN.
 #   VLLM_BASE_URL - internal vLLM endpoint, e.g. http://vllm.internal.svc:8000/v1
 #   VLLM_MODEL    - served model name, e.g. Qwen2.5-Coder-32B-Instruct
 #

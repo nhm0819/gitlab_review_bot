@@ -74,10 +74,23 @@ vllm serve Qwen/Qwen3.6-35B-A3B-FP8 \
 
 | 변수명 | 필수 | 설명 |
 |---|---|---|
-| `GITLAB_TOKEN` | ✅ | GitLab access token (`api` scope). Masked + Protected 권장 |
+| `GITLAB_TOKEN` | ✅ | GitLab access token (`api` scope). **Masked만 켜고 Protected는 끄세요** (아래 참고) |
 | `VLLM_BASE_URL` | ✅ | 내부 vLLM 엔드포인트 (예: `http://vllm.internal.svc:8000/v1`) |
 | `VLLM_MODEL` | | 서빙된 모델명. 기본 `Qwen/Qwen3.6-35B-A3B-FP8` |
 | `VLLM_API_KEY` | | 게이트웨이가 키를 요구할 때만. 기본 `not-needed` |
+
+
+> ⚠️ **`GITLAB_TOKEN`에 "Protect variable"을 켜지 마세요.**
+> Protected 변수는 protected 브랜치의 파이프라인에만 노출되며, MR
+> 파이프라인은 **source와 target 브랜치가 둘 다 protected**여야 접근할 수
+> 있습니다. 이 job은 feature 브랜치에서 `merge_request_event`로 실행되므로
+> Protected를 켜면 변수가 조용히 누락되고 `Missing required environment
+> variable: GITLAB_TOKEN` 오류가 납니다.
+> "Mask variable"은 켜두셔도 됩니다 (로그 마스킹 용도라 무관).
+>
+> 참고로 `.gitlab-ci.yml`에 `GITLAB_TOKEN: $GITLAB_TOKEN`을 추가하는 것은
+> 해결책이 아닙니다. CI/CD 변수는 자동으로 주입되고, 프로젝트 변수가
+> `.gitlab-ci.yml` 변수보다 우선순위가 높습니다.
 
 ### 4. 컨테이너 이미지 빌드 및 harbor 레지스트리에 push
 

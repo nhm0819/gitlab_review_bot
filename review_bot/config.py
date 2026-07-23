@@ -26,10 +26,31 @@ class ConfigError(RuntimeError):
     """Raised when required configuration is missing or invalid."""
 
 
+# A CI/CD variable marked "Protect variable" is only exposed to pipelines on
+# protected branches. Merge request pipelines additionally need BOTH the source
+# and target branch protected, so on a normal feature branch the variable is
+# silently absent -- which looks exactly like never having set it.
+_PROTECTED_VARIABLE_HINT = (
+    "This job is running in GitLab CI, so the variable is either not set on this "
+    "project/group, or it is set but marked \"Protect variable\". Protected variables "
+    "are only exposed to pipelines on protected branches, and merge request pipelines "
+    "need both the source and target branch protected. Since this job runs on "
+    "merge_request_event from a feature branch, clear the \"Protect variable\" checkbox "
+    "in Settings > CI/CD > Variables (keep \"Mask variable\" enabled)."
+)
+
+
+def _missing_variable_message(name: str) -> str:
+    message = f"Missing required environment variable: {name}"
+    if os.environ.get("CI_JOB_ID") and name in ("GITLAB_TOKEN", "REVIEW_BOT_GITLAB_TOKEN"):
+        message += f". {_PROTECTED_VARIABLE_HINT}"
+    return message
+
+
 def _env(name: str, default: Optional[str] = None, required: bool = False) -> Optional[str]:
     value = os.environ.get(name, default)
     if required and not value:
-        raise ConfigError(f"Missing required environment variable: {name}")
+        raise ConfigError(_missing_variable_message(name))
     return value
 
 
