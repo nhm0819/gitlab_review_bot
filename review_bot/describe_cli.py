@@ -83,7 +83,7 @@ def _run(log: logging.Logger) -> int:
                  extra={"fields": {"skipped": "exclude_rule"}})
         return 0
 
-    collected = _collect_changes(client, rules)
+    collected = _collect_changes(client, rules, mr)
     if not collected:
         log.info("no reviewable file changes found, skipping",
                  extra={"fields": {"skipped": "no_changes"}})
@@ -174,9 +174,10 @@ def main() -> int:
         shutdown_logging()
 
 
-def _collect_changes(client: GitLabClient, rules: ReviewRules) -> List[FileChange]:
+def _collect_changes(client: GitLabClient, rules: ReviewRules, mr: dict) -> List[FileChange]:
+    raw_changes, _upstream_truncated = client.get_mr_file_changes(mr)
     changes: List[FileChange] = []
-    for change in client.get_mr_changes():
+    for change in raw_changes:
         path = change.get("new_path") or change.get("old_path")
         diff = change.get("diff", "")
         if not path or not diff or rules.skip_path(path):

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate wheels/ so the Dockerfile can `pip install --no-index` on an
-# air-gapped runner. Run this from a machine WITH internet access whenever
+# Regenerate wheels/ so the Dockerfile and the pytest job can
+# `pip install --no-index` on an air-gapped runner. Run this from a machine WITH internet access whenever
 # requirements.txt or pyproject.toml dependencies change, then commit the
 # resulting wheels/ directory.
 #
@@ -13,7 +13,8 @@ cd "$(dirname "$0")/.."
 rm -rf wheels
 mkdir -p wheels
 
-pip download -r requirements.txt setuptools wheel -d wheels \
+# pytest is included so the air-gapped pytest job can install ".[dev]".
+pip download -r requirements.txt setuptools wheel pytest -d wheels \
   --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
   --python-version 3.12 --implementation cp --abi cp312 \
   --only-binary=:all:

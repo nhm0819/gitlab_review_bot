@@ -54,8 +54,9 @@ def _run(log: logging.Logger) -> int:
         log.info("merge request matches an exclude rule, skipping", extra={"fields": {"skipped": "exclude_rule"}})
         return 0
 
+    changes, upstream_truncated = client.get_mr_file_changes(mr)
     collected: List[FileChange] = []
-    for change in client.get_mr_changes():
+    for change in changes:
         new_path = change.get("new_path") or change.get("old_path")
         if not new_path or change.get("deleted_file") or rules.skip_path(new_path):
             continue
@@ -149,8 +150,13 @@ def _run(log: logging.Logger) -> int:
             summary_lines.append("\n**Additional notes:**")
             for c in skipped_comments:
                 summary_lines.append(f"- `{c.file}` (line {c.line}, {c.severity}): {c.comment}")
-        if truncated or dropped:
+        if truncated or dropped or upstream_truncated:
             summary_lines.append("\n**Coverage:**")
+            if upstream_truncated:
+                summary_lines.append(
+                    "- GitLab reported this merge request's diff as too large to return in full; "
+                    "raw diffs were used, but some changes may still be missing."
+                )
             if len(batches) > 1:
                 summary_lines.append(f"- Reviewed in {len(batches)} passes and merged.")
             for change in ranked:

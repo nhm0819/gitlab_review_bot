@@ -13,3 +13,5 @@ build/
 .pytest_cache/
 examples/
 README.md
+tests/
+.github/

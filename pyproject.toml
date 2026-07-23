@@ -16,9 +16,18 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 gitlab-review-bot = "review_bot.cli:main"
 gitlab-mr-describe = "review_bot.describe_cli:main"
 
 [tool.setuptools]
 packages = ["review_bot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/ is on sys.path so the shared conftest helpers can be imported directly.
+pythonpath = ["tests"]
+addopts = "-q"

@@ -11,6 +11,7 @@
 include:
   - local: 'ci/review.gitlab-ci.yml'
   - local: 'ci/lint.gitlab-ci.yml'
+  - local: 'ci/test.gitlab-ci.yml'
   - local: 'ci/release.gitlab-ci.yml'
 
 stages:

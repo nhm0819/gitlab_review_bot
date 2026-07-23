@@ -110,6 +110,7 @@ class Config:
             top_k=int(_env("VLLM_TOP_K", "20")),
             presence_penalty=float(_env("VLLM_PRESENCE_PENALTY", "0.0")),
             enable_thinking=_env_bool("VLLM_ENABLE_THINKING", "true"),
+            max_retries=int(_env("VLLM_MAX_RETRIES", "3")),
         )
 
         return cls(

@@ -37,6 +37,9 @@ class LLMSettings:
     top_k: int = 20
     presence_penalty: float = 0.0
     enable_thinking: bool = True
+    # Transient vLLM failures (pod restart, queue overload) should not lose a
+    # whole review. The SDK retries connection errors, 408/409/429 and 5xx.
+    max_retries: int = 3
 
 
 def build_client(settings: LLMSettings) -> OpenAI:
@@ -44,6 +47,7 @@ def build_client(settings: LLMSettings) -> OpenAI:
         base_url=settings.base_url,
         api_key=settings.api_key or "not-needed",
         timeout=settings.timeout,
+        max_retries=settings.max_retries,
     )
 
 

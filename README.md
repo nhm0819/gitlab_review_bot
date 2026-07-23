@@ -35,13 +35,25 @@ review_bot/
 ├── llm.py              # vLLM 공통 전송 (샘플링 파라미터, thinking 처리, JSON 파싱)
 ├── batching.py         # 큰 diff 처리 (우선순위 랭킹 / 잘라내기 / 배치 분할)
 ├── logging_setup.py    # 구조화 로깅 (JSON stdout / Loki push / 시크릿 마스킹)
+├── retry.py            # HTTP 재시도 (멱등/비멱등 구분)
 ├── reviewer.py         # 리뷰 생성
 ├── describe.py         # 제목/설명 생성
 └── prompts.py          # 시스템/유저 프롬프트 템플릿
 
 .gitlab-ci.yml           # 리뷰 대상 프로젝트에 붙여 넣거나 include할 CI job 템플릿
 examples/review-bot.example.yml  # 프로젝트별 예외 규칙 설정 예시
+tests/                   # pytest 테스트 (87개)
 ```
+
+## 테스트
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+브랜치 push 시 `ci/test.gitlab-ci.yml`의 `pytest` job으로 자동 실행됩니다.
+벤더링된 wheel만 사용하므로 폐쇄망 러너에서도 동작합니다.
 
 ## 설치 및 설정
 
@@ -274,6 +286,7 @@ python -m review_bot.describe_cli
 | `VLLM_TOP_K` | `20` | 〃 (`extra_body`로 전달) |
 | `VLLM_PRESENCE_PENALTY` | `0.0` | 〃 |
 | `VLLM_ENABLE_THINKING` | `true` | `false`면 thinking 비활성화(빠름/저비용) |
+| `VLLM_MAX_RETRIES` | `3` | vLLM 요청 재시도 횟수 |
 | `DESCRIBE_LANGUAGE` | `Korean` | 생성되는 MR 제목/설명의 언어 |
 | `MAX_DIFF_CHARS` | `200000` | **요청 1회당** diff 글자수 예산 |
 | `MAX_FILE_DIFF_CHARS` | `40000` | 파일 1개당 상한. 초과 시 hunk 경계에서 잘림 |
@@ -288,6 +301,28 @@ python -m review_bot.describe_cli
 | `LOKI_TENANT` | (없음) | 멀티테넌트 Loki의 `X-Scope-OrgID` |
 | `LOKI_EXTRA_LABELS` | (없음) | 추가 라벨. `env=prod,cluster=kodata-ai` 형식 |
 | `LOKI_TIMEOUT` | `10` | Loki push 타임아웃(초) |
+
+## 안정성
+
+**재시도** — vLLM과 GitLab API 호출은 일시적 실패(502, 429, 커넥션 끊김)에
+지수 백오프로 재시도합니다. `Retry-After` 헤더를 존중합니다.
+
+단, **코멘트 중복 게시를 막기 위해 멱등성을 구분**합니다. 요청이 서버에
+도달했는데 응답만 유실된 경우 재전송하면 코멘트가 두 번 달리기 때문입니다.
+
+| 요청 | 재시도 조건 |
+|---|---|
+| GET, PUT(제목/설명 갱신) | 커넥션 오류, 타임아웃, 429/500/502/503/504 |
+| POST(코멘트 게시) | 커넥션 오류, 429/503 **만** (서버가 처리하지 않은 것이 확실한 경우) |
+
+**GitLab diff 잘림 감지** — GitLab은 diff가 크면 DB 기반 응답을 잘라서
+반환하고 `changes_count`를 `"1000+"` 형태로 표시합니다. 이걸 감지하지 못하면
+**일부만 보고 전체를 봤다고 착각**하게 됩니다. 봇은 이 경우 Gitaly에서 직접
+읽는 raw diff로 다시 가져오고, 그래도 불완전할 수 있으면 요약 코멘트의
+Coverage에 명시합니다.
+
+또한 deprecated된 `/changes` 대신 `/diffs` 엔드포인트를 페이지네이션으로
+사용합니다.
 
 ## 로깅 / 관측성 (Alloy + Loki)
 

@@ -1,0 +1,18 @@
+# Unit tests for this repository.
+#
+# Runs against the vendored wheels under wheels/ (--no-index), so the runner
+# needs no internet access, matching the release build. pytest itself is a dev
+# dependency, so wheels/ must contain it: scripts/vendor-wheels.sh vendors the
+# dev extra as well.
+#
+# The tests use only local stub HTTP servers on 127.0.0.1 -- no GitLab
+# instance, no vLLM, no credentials required.
+
+pytest:
+  stage: lint
+  image: harbor-ai.kodata.co.kr/library/python:3.12-slim
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+  script:
+    - pip install --no-index --find-links=wheels/ ".[dev]"
+    - pytest
