@@ -1,0 +1,37 @@
+# Lint jobs for this repository.
+#
+# Uses ruff from the internal harbor mirror so the runner needs no internet
+# access, matching how the review-bot image is consumed.
+#
+# If ruff is not mirrored yet, either:
+#   a) mirror it:  ghcr.io/astral-sh/ruff:<tag> -> harbor-ai.kodata.co.kr/library/ruff:<tag>
+#   b) or swap the image for python:3.12-slim and add
+#      `before_script: - pip install ruff==<version>` (needs egress).
+#
+# ruff runs with its default rule set; drop a [tool.ruff] section into
+# pyproject.toml to tune it.
+
+.lint_base:
+  stage: lint
+  image:
+    name: harbor-ai.kodata.co.kr/library/ruff:0.14.0
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+
+# Static analysis: unused imports, undefined names, obvious bugs.
+ruff_check:
+  extends: .lint_base
+  script:
+    - ruff check --output-format=gitlab review_bot > gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+
+# Formatting check only -- never rewrites files in CI.
+ruff_format:
+  extends: .lint_base
+  script:
+    - ruff format --check --diff review_bot

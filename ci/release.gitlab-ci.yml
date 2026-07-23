@@ -1,0 +1,47 @@
+# Release pipeline: builds and pushes the review-bot image on `v*` tags.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables), both masked:
+#   HARBOR_USERNAME - harbor robot account or user with push rights
+#   HARBOR_PASSWORD - its password / robot token
+#
+# Tagging: `git tag v0.1.0 && git push origin v0.1.0` after bumping
+# `version` in pyproject.toml. The two must match or verify_version fails.
+
+# Guards against the tag and the pyproject.toml version drifting apart.
+verify_version:
+  stage: verify
+  image: python:3.12-slim
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - PYPROJECT_VERSION=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+    - |
+      if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
+        echo "tag $CI_COMMIT_TAG does not match pyproject version $PYPROJECT_VERSION"
+        exit 1
+      fi
+
+build_image:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  variables:
+    IMAGE: harbor-ai.kodata.co.kr/library/gitlab-review-bot
+  before_script:
+    - export VERSION="${CI_COMMIT_TAG#v}"
+    - mkdir -p /kaniko/.docker
+    - |
+      AUTH=$(printf '%s:%s' "$HARBOR_USERNAME" "$HARBOR_PASSWORD" | base64 | tr -d '\n')
+      cat > /kaniko/.docker/config.json <<EOF
+      {"auths":{"harbor-ai.kodata.co.kr":{"auth":"$AUTH"}}}
+      EOF
+  script:
+    - /kaniko/executor
+      --context "$CI_PROJECT_DIR"
+      --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+      --destination "$IMAGE:$VERSION"
+      --destination "$IMAGE:latest"

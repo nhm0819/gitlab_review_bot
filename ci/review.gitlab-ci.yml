@@ -1,0 +1,69 @@
+# Reusable CI/CD jobs for AI-powered merge request automation.
+#
+# Uses an internal vLLM service (OpenAI-compatible API) -- no external API calls.
+# Runs from a prebuilt image on the internal harbor registry, so there is no
+# pip install at job time and the runner needs no internet access.
+#
+# `entrypoint: [""]` is required because the image defines an ENTRYPOINT; the
+# runner needs a plain shell to execute the `script:` block.
+#
+# Copy the jobs below into the target project's .gitlab-ci.yml (or include this
+# file if the repo is mirrored onto your GitLab instance):
+#
+#   include:
+#     - project: 'your-group/gitlab_review_bot'
+#       file: '/ci/review.gitlab-ci.yml'
+#       ref: main
+#
+# The jobs below deliberately declare no `stage:`, so they land in the default
+# `test` stage of whichever project includes this file.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   GITLAB_TOKEN  - a project/group access token with `api` scope.
+#                   Mask it, but do NOT tick "Protect variable": protected
+#                   variables are withheld from merge request pipelines unless
+#                   both source and target branches are protected, so the job
+#                   would fail with a missing GITLAB_TOKEN.
+#   VLLM_BASE_URL - internal vLLM endpoint, e.g. http://vllm.internal.svc:8000/v1
+#   VLLM_MODEL    - served model name, e.g. Qwen2.5-Coder-32B-Instruct
+#
+# Optional: VLLM_API_KEY, VLLM_TIMEOUT, VLLM_MAX_TOKENS, VLLM_TEMPERATURE,
+#           DESCRIBE_LANGUAGE (default: Korean).
+#
+# Logging: JSON lines go to stdout. Under the Kubernetes executor's default
+# `attach` strategy that is also the build container's stdout, so an
+# Alloy/Promtail pod-log scrape collects it. Set LOKI_URL to additionally push
+# straight to Loki, which does not depend on the runner's strategy.
+#
+# Optional: commit a .gitlab/review-bot.yml file to the project being
+# reviewed (see examples/review-bot.example.yml) to exclude branches,
+# authors, or paths, and to add custom review instructions.
+
+.review_bot_base: &review_bot_base
+  image:
+    name: harbor-ai.kodata.co.kr/library/gitlab-review-bot:0.1.0
+    entrypoint: [""]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  variables:
+    GITLAB_URL: "$CI_SERVER_URL"
+    LOG_FORMAT: "json"
+    # LOKI_URL: "http://loki.monitoring.svc.cluster.local:3100"
+    # LOKI_TENANT: ""
+    # LOKI_EXTRA_LABELS: "env=prod"
+  allow_failure: true
+
+# Posts inline review comments and a summary note on the merge request.
+ai_code_review:
+  <<: *review_bot_base
+  script:
+    - gitlab-review-bot
+
+# Fills in the merge request title/description generated from the diff.
+# By default only fills what is still empty or auto-generated; add the
+# `ai:describe` label (or `/ai-describe` in the description) to append a
+# generated summary alongside text a human already wrote.
+ai_mr_describe:
+  <<: *review_bot_base
+  script:
+    - gitlab-mr-describe
