@@ -20,7 +20,7 @@
     name: harbor-ai.kodata.co.kr/astral-sh/ruff:latest
     entrypoint: [""]
   rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "push"'
 
 # Static analysis: unused imports, undefined names, obvious bugs.
 ruff_check:
